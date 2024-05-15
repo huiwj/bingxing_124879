@@ -1,103 +1,99 @@
-#include<iostream>
-#include<windows.h>
-#include<stdlib.h>
-#include<chrono>
-using namespace std;
- long long int** b;
-void init(int n)
-{
+#include <stdio.h>  
+#include <stdlib.h>  
+#include <pthread.h>  
+#include <iostream>
+#include <sys/time.h>
+#include <unistd.h>
 
-	b = new long long int* [n];
-	for (int i = 0; i < n; i++)
-	{
-		*(b + i) = new long long int[n];
-	}
-	for (int i = 0; i < n; i++)
-		for (int j = 0; j < n; j++)
-			b[i][j] = 2*i + j + 1;
+// 假设 A 和 n 在此之前已经定义和初始化  
+const int n=1000;
+float A[n][n]; // 或者使用动态分配的二维数组  
+
+void init()
+{
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            A[i][j] = 0;
+        }
+        A[i][i] = 1.0;
+        for (int j = i + 1; j < n; j++)
+            A[i][j] = rand() % 100;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        int k1 = rand() % n;
+        int k2 = rand() % n;
+        for (int j = 0; j < n; j++)
+        {
+            A[i][j] += A[0][j];
+            A[k1][j] += A[k2][j];
+        }
+    }
 }
-int main()
-{
-	long long head, tail, freq;
-	int n;
-	cin >> n;
-	int*a;
-	a = new int[n];
-	for (int i = 0; i < n; i++)
-		a[i]=i+1;
-	init(n);
-	long long int* sum;
-	sum = new long long int[n];
-	auto beforeTime1 = std::chrono::steady_clock::now();
-	for (int i = 0; i < n; i++)
-	{
-		sum[i] = 0;
-		for (int j = 0; j < n; j++)
-		{
-			sum[i] += b[j][i] * a[j];
-		}
-	}
-	auto afterTime1 = std::chrono::steady_clock::now();
-	double duration_second1 = std::chrono::duration<double,std::nano>(afterTime1 - beforeTime1).count();
-	cout << "耗时：" << duration_second1 <<"纳秒" << endl;
-	/*
-	cout << "结果为：" << endl;
-	for (int i = 0; i < n; i++)
-	{
-		cout << sum[i]<<" ";
-	}
-	cout << endl;
-	*/
-	auto beforeTime = std::chrono::steady_clock::now();
-	for (int i = 0; i < n; i++)
-		sum[i] = 0;
-	for (int j = 0; j < n; j++)
-		for (int i = 0; i < n; i++)
-			sum[i] += b[j][i] * a[j];
-	auto afterTime = std::chrono::steady_clock::now();
-	double duration_second = std::chrono::duration<double, std::nano>(afterTime - beforeTime).count();
-	cout << "耗时：" << duration_second << "纳秒" << endl;
-	
-	/*
-	cout << "结果为：" << endl;;
-	for (int i = 0; i < n; i++)
-	{
-		cout << sum[i] << " ";
-	}
-	cout << endl;
-	*/
-	//求和
-	int s = 0;
-	auto beforeTime2 = std::chrono::steady_clock::now();
-	for (int i = 0; i < n; i++)
-		s += a[i];
-	auto afterTime2 = std::chrono::steady_clock::now();
-	double duration_second2 = std::chrono::duration<double, std::nano>(afterTime2 - beforeTime2).count();
-	cout << "耗时：" << duration_second2 << "纳秒" << endl;
-	cout << "结果：" << s << endl;
 
-	auto beforeTime4 = std::chrono::steady_clock::now();
-	long long int s1 = 0, s2 = 0;
-	for (int i = 0; i < n; i = i + 2)
-	{
-		s1 += a[i];
-		s2 += a[i + 1];
-	}
-	s1 = s1 + s2;
-	auto afterTime4 = std::chrono::steady_clock::now();
-	double duration_second4 = std::chrono::duration<double, std::nano>(afterTime4 - beforeTime4).count();
-	cout << "耗时：" << duration_second4 << "纳秒" << endl;
-	cout << "结果：" << s1 << endl;
+typedef struct {
+    int k; // 消去的轮次  
+    int t_id; // 线程id  
+} threadParam_t;
 
-	auto beforeTime3 = std::chrono::steady_clock::now();
-	for (int m = n; m > 1; m /= 2)
-		for (int i = 0; i < m / 2; i++)
-			a[i] = a[i * 2] + a[i * 2 + 1];
-	auto afterTime3 = std::chrono::steady_clock::now();
-	double duration_second3 = std::chrono::duration<double, std::nano>(afterTime3 - beforeTime3).count();
-	cout << "耗时：" << duration_second3 << "纳秒" << endl;
-	cout << "结果：" << a[0] << endl;
+void* threadFunc(void* param) {
+    threadParam_t* p = (threadParam_t*)param;
+    int k = p->k; // 消去的轮次  
+    int t_id = p->t_id; // 线程编号  
+    int i = k + t_id + 1; // 获取自己的计算任务  
 
-	
-	return 0;
+    // 确保 k 不是最后一列  
+    if (k < n - 1) {
+        for (int j = k + 1; j < n; ++j) {
+            A[i][j] = A[i][j] - A[i][k] * A[k][j];
+        }
+        A[i][k] = 0;
+    }
+
+    pthread_exit(NULL);
+}
+
+int main() {
+    init();
+    struct timeval tstart, tend;
+    double timeUsed;
+    gettimeofday(&tstart, NULL);
+    for (int k = 0; k < n - 1; ++k) { // 注意循环条件，因为我们要避免除以0  
+        // 主线程做除法操作  
+        for (int j = k + 1; j < n; ++j) {
+            if (A[k][k] != 0.0) { // 检查分母是否为0  
+                A[k][j] = A[k][j] / A[k][k];
+            }
+        }
+        A[k][k] = 1.0; // 将主对角线上的元素设为1  
+
+        // 创建工作线程，进行消去操作  
+        int worker_count = n - 1 - k; // 工作线程数量  
+        pthread_t* handles = (pthread_t*)malloc(worker_count * sizeof(pthread_t));
+        threadParam_t* param = (threadParam_t*)malloc(worker_count * sizeof(threadParam_t));
+
+        // 分配任务  
+        for (int t_id = 0; t_id < worker_count; ++t_id) {
+            param[t_id].k = k;
+            param[t_id].t_id = t_id;
+            // 注意这里应该调用 pthread_create 并传入正确的参数  
+            pthread_create(&handles[t_id], NULL, threadFunc, &param[t_id]);
+        }
+
+        // 主线程挂起等待所有的工作线程完成此轮消去工作  
+        for (int t_id = 0; t_id < worker_count; ++t_id) {
+            pthread_join(handles[t_id], NULL);
+        }
+
+        // 释放内存  
+        free(handles);
+        free(param);
+    }
+    gettimeofday(&tend, NULL);
+    timeUsed = 1000000 * (tend.tv_sec - tstart.tv_sec) + tend.tv_usec - tstart.tv_usec;
+    std::cout << " Time=" << timeUsed / 1000 << " ms" << std::endl;
+    return 0;
 }
