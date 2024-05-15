@@ -5,9 +5,9 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-// ¼ÙÉè A ºÍ n ÔÚ´ËÖ®Ç°ÒÑ¾­¶¨ÒåºÍ³õÊ¼»¯  
+// å‡è®¾ A å’Œ n åœ¨æ­¤ä¹‹å‰å·²ç»å®šä¹‰å’Œåˆå§‹åŒ–  
 const int n=1000;
-float A[n][n]; // »òÕßÊ¹ÓÃ¶¯Ì¬·ÖÅäµÄ¶şÎ¬Êı×é  
+float A[n][n]; // æˆ–è€…ä½¿ç”¨åŠ¨æ€åˆ†é…çš„äºŒç»´æ•°ç»„  
 
 void init()
 {
@@ -35,17 +35,17 @@ void init()
 }
 
 typedef struct {
-    int k; // ÏûÈ¥µÄÂÖ´Î  
-    int t_id; // Ïß³Ìid  
+    int k; // æ¶ˆå»çš„è½®æ¬¡  
+    int t_id; // çº¿ç¨‹id  
 } threadParam_t;
 
 void* threadFunc(void* param) {
     threadParam_t* p = (threadParam_t*)param;
-    int k = p->k; // ÏûÈ¥µÄÂÖ´Î  
-    int t_id = p->t_id; // Ïß³Ì±àºÅ  
-    int i = k + t_id + 1; // »ñÈ¡×Ô¼ºµÄ¼ÆËãÈÎÎñ  
+    int k = p->k; // æ¶ˆå»çš„è½®æ¬¡  
+    int t_id = p->t_id; // çº¿ç¨‹ç¼–å·  
+    int i = k + t_id + 1; // è·å–è‡ªå·±çš„è®¡ç®—ä»»åŠ¡  
 
-    // È·±£ k ²»ÊÇ×îºóÒ»ÁĞ  
+    // ç¡®ä¿ k ä¸æ˜¯æœ€åä¸€åˆ—  
     if (k < n - 1) {
         for (int j = k + 1; j < n; ++j) {
             A[i][j] = A[i][j] - A[i][k] * A[k][j];
@@ -61,34 +61,34 @@ int main() {
     struct timeval tstart, tend;
     double timeUsed;
     gettimeofday(&tstart, NULL);
-    for (int k = 0; k < n - 1; ++k) { // ×¢ÒâÑ­»·Ìõ¼ş£¬ÒòÎªÎÒÃÇÒª±ÜÃâ³ıÒÔ0  
-        // Ö÷Ïß³Ì×ö³ı·¨²Ù×÷  
+    for (int k = 0; k < n - 1; ++k) { // æ³¨æ„å¾ªç¯æ¡ä»¶ï¼Œå› ä¸ºæˆ‘ä»¬è¦é¿å…é™¤ä»¥0  
+        // ä¸»çº¿ç¨‹åšé™¤æ³•æ“ä½œ  
         for (int j = k + 1; j < n; ++j) {
-            if (A[k][k] != 0.0) { // ¼ì²é·ÖÄ¸ÊÇ·ñÎª0  
+            if (A[k][k] != 0.0) { // æ£€æŸ¥åˆ†æ¯æ˜¯å¦ä¸º0  
                 A[k][j] = A[k][j] / A[k][k];
             }
         }
-        A[k][k] = 1.0; // ½«Ö÷¶Ô½ÇÏßÉÏµÄÔªËØÉèÎª1  
+        A[k][k] = 1.0; // å°†ä¸»å¯¹è§’çº¿ä¸Šçš„å…ƒç´ è®¾ä¸º1  
 
-        // ´´½¨¹¤×÷Ïß³Ì£¬½øĞĞÏûÈ¥²Ù×÷  
-        int worker_count = n - 1 - k; // ¹¤×÷Ïß³ÌÊıÁ¿  
+        // åˆ›å»ºå·¥ä½œçº¿ç¨‹ï¼Œè¿›è¡Œæ¶ˆå»æ“ä½œ  
+        int worker_count = n - 1 - k; // å·¥ä½œçº¿ç¨‹æ•°é‡  
         pthread_t* handles = (pthread_t*)malloc(worker_count * sizeof(pthread_t));
         threadParam_t* param = (threadParam_t*)malloc(worker_count * sizeof(threadParam_t));
 
-        // ·ÖÅäÈÎÎñ  
+        // åˆ†é…ä»»åŠ¡  
         for (int t_id = 0; t_id < worker_count; ++t_id) {
             param[t_id].k = k;
             param[t_id].t_id = t_id;
-            // ×¢ÒâÕâÀïÓ¦¸Ãµ÷ÓÃ pthread_create ²¢´«ÈëÕıÈ·µÄ²ÎÊı  
+            // æ³¨æ„è¿™é‡Œåº”è¯¥è°ƒç”¨ pthread_create å¹¶ä¼ å…¥æ­£ç¡®çš„å‚æ•°  
             pthread_create(&handles[t_id], NULL, threadFunc, &param[t_id]);
         }
 
-        // Ö÷Ïß³Ì¹ÒÆğµÈ´ıËùÓĞµÄ¹¤×÷Ïß³ÌÍê³É´ËÂÖÏûÈ¥¹¤×÷  
+        // ä¸»çº¿ç¨‹æŒ‚èµ·ç­‰å¾…æ‰€æœ‰çš„å·¥ä½œçº¿ç¨‹å®Œæˆæ­¤è½®æ¶ˆå»å·¥ä½œ  
         for (int t_id = 0; t_id < worker_count; ++t_id) {
             pthread_join(handles[t_id], NULL);
         }
 
-        // ÊÍ·ÅÄÚ´æ  
+        // é‡Šæ”¾å†…å­˜  
         free(handles);
         free(param);
     }
