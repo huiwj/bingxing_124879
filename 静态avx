@@ -141,9 +141,12 @@ void Gaussian_AVX()
         // 主线程睡眠（等待所有的工作线程完成此轮消去任务）
         for (int t_id = 0; t_id < NUM_THREADS; t_id++)
         {
-            sem_wait(&sem_workerend[t_id]);
+            sem_wait(&sem_main);
         }
-
+        for (int t_id = 0; t_id < NUM_THREADS; t_id++)
+        {
+            sem_post(&sem_workerend[t_id]);
+        }
     }
 
     for (int t_id = 0; t_id < NUM_THREADS; t_id++)
@@ -154,7 +157,6 @@ void Gaussian_AVX()
         sem_destroy(&sem_workerstart[i]);
         sem_destroy(&sem_workerend[i]);
     }
-    sem_destroy(&sem_main);
 }
 
 int main() {
