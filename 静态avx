@@ -1,0 +1,168 @@
+#include <stdio.h>  
+#include <stdlib.h>  
+#include <pthread.h>  
+#include <iostream>
+#include <sys/time.h>
+#include <unistd.h>
+#include <semaphore.h> 
+#include <immintrin.h> // 引入 AVX 指令集相关的头文件
+
+const int n = 1000;
+double A[3000][3000]; // 或者使用动态分配的二维数组  
+
+const int  NUM_THREADS = 4;
+// 静态信号量定义  
+
+sem_t sem_main;
+sem_t sem_workerstart[NUM_THREADS];
+sem_t sem_workerend[NUM_THREADS];
+
+truct timeval tstart, tend;
+double timeUsed;
+
+
+typedef struct {
+    int k; // 消去的轮次  
+    int t_id; // 线程id  
+} threadParam_t;
+
+void init()
+{
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            A[i][j] = 0;
+        }
+        A[i][i] = 1.0;
+        for (int j = i + 1; j < n; j++)
+            A[i][j] = rand() % 100;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        int k1 = rand() % n;
+        int k2 = rand() % n;
+        for (int j = 0; j < n; j++)
+        {
+            A[i][j] += A[0][j];
+            A[k1][j] += A[k2][j];
+        }
+    }
+}
+
+
+void* threadFunc_S(void* param)
+{
+    threadParam_t* p = (threadParam_t*)param;
+    int t_id = p->t_id;
+    __m256d ones = _mm256_set1_pd(1.0);
+    __m256d tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp8;
+    for (int k = 0; k < n; k++)
+    {
+        sem_wait(&sem_workerstart[t_id]);//阻塞，等待主线完成除法操作（操作自己专属的信号量）
+        for (int i = k + 1 + t_id; i < n; i += NUM_THREADS)//循环划分任务
+        {
+            __m256d akk = _mm256_set1_pd(A[k][k]);
+            __m256d aik = _mm256_loadu_pd(&A[i][k]);
+            tmp1 = _mm256_mul_pd(akk, aik);
+
+            for (int j = (k + 1) / 8 * 8; j < n; j += 8)
+            {
+                __m256d akj = _mm256_loadu_pd(&A[k][j]);
+                __m256d ajj = _mm256_loadu_pd(&A[j][j]);
+
+                tmp2 = _mm256_set1_pd(A[i][j]);
+                tmp3 = _mm256_mul_pd(aik, akj);
+                tmp4 = _mm256_mul_pd(tmp3, ones);
+                tmp5 = _mm256_sub_pd(tmp2, tmp4);
+                tmp6 = _mm256_div_pd(tmp5, ajj);
+
+                __m256d ajk = _mm256_loadu_pd(&A[j][k]);
+                tmp7 = _mm256_mul_pd(tmp6, ajk);
+                tmp8 = _mm256_sub_pd(aik, tmp7);
+
+                _mm256_storeu_pd(&A[i][j], tmp5);
+                _mm256_storeu_pd(&A[i][k], tmp8);
+            }
+
+            // 处理剩余的元素
+            for (int j = (k + 1) / 8 * 8; j < k + 1; j++)
+            {
+                A[i][j] -= A[i][k] * A[k][j];
+            }
+            A[i][k] = 0.0;
+        }
+        sem_post(&sem_main);//唤醒主线程
+        sem_wait(&sem_workerend[t_id]);//阻塞，等待主线程唤醒进入下一轮
+    }
+
+    pthread_exit(NULL);
+    return NULL;
+}
+
+
+void Gaussian_AVX()
+{
+    // 初始化信号量
+    sem_init(&sem_main, 0, 0); // 主线程不需要等待sem_main
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        sem_init(&sem_workerstart[i], 0, 0);
+        sem_init(&sem_workerend[i], 0, 0);
+    }
+
+    // 创建线程和参数
+    pthread_t pthread_handles[NUM_THREADS];
+    threadParam_t param[NUM_THREADS];
+    for (int t_id = 0; t_id < NUM_THREADS; t_id++) {
+        param[t_id].t_id = t_id;
+        pthread_create(&pthread_handles[t_id], NULL, threadFunc_S, &param[t_id]);
+    }
+
+    for (int k = 0; k < n; k++)
+    {
+        // 主线程做除法操作
+        for (int j = k + 1; j < n; j += 8) // 使用 AVX 指令集每次处理 8 个元素
+        {
+            if (j + 8 > n) break; // 防止越界 
+
+            __m256d divisor = _mm256_set1_pd(A[k][k]); // 创建包含 A[k][k] 的 8 个副本的 AVX 寄存器
+            __m256d dividend = _mm256_loadu_pd(&A[k][j]); // 从内存加载 8 个元素到 AVX 寄存器
+            __m256d result = _mm256_div_pd(dividend, divisor); // 执行除法操作
+            _mm256_storeu_pd(&A[k][j], result); // 将结果存回内存
+        }
+        A[k][k] = 1.0;
+
+        // 唤醒工作线程
+        for (int t_id = 0; t_id < NUM_THREADS; t_id++)
+        {
+            sem_post(&sem_workerstart[t_id]);
+        }
+        // 主线程睡眠（等待所有的工作线程完成此轮消去任务）
+        for (int t_id = 0; t_id < NUM_THREADS; t_id++)
+        {
+            sem_wait(&sem_workerend[t_id]);
+        }
+
+    }
+
+    for (int t_id = 0; t_id < NUM_THREADS; t_id++)
+        pthread_join(pthread_handles[t_id], NULL);
+  
+
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        sem_destroy(&sem_workerstart[i]);
+        sem_destroy(&sem_workerend[i]);
+    }
+    sem_destroy(&sem_main);
+}
+
+int main() {
+    srand(time(NULL));
+    init();
+    gettimeofday(&tstart, NULL);
+    Gaussian_AVX();
+    gettimeofday(&tend, NULL);
+    long timeUsed = (tend.tv_sec - tstart.tv_sec) * 1000000L + (tend.tv_usec - tstart.tv_usec);
+    std::cout << " Time=" << timeUsed / 1000.0 << " ms" << std::endl;
+}
