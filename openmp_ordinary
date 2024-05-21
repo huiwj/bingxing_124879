@@ -1,0 +1,211 @@
+#include <omp.h> 
+#include <stdio.h>  
+#include <stdlib.h>  
+#include <iostream>
+#include <sys/time.h>
+#include <unistd.h>
+#include <immintrin.h> // 引入 AVX 指令集相关的头文件
+#include <emmintrin.h>
+using namespace std;
+
+int n = 200;
+double A[3000][3000]; // 或者使用动态分配的二维数组  
+struct timeval tstart, tend;
+double timeUsed;
+const int  NUM_THREADS = 4;
+
+void init()
+{
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            A[i][j] = 0;
+        }
+        A[i][i] = 1.0;
+        for (int j = i + 1; j < n; j++)
+            A[i][j] = rand() % 100;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        int k1 = rand() % n;
+        int k2 = rand() % n;
+        for (int j = 0; j < n; j++)
+        {
+            A[i][j] += A[0][j];
+            A[k1][j] += A[k2][j];
+        }
+    }
+}
+
+void open_ordi()
+{
+    for (int k = 0; k < n - 1; ++k) {
+        // 串行部分：选取主元，并进行行标准化  
+        double tmp = A[k][k];
+        if (tmp == 0) {
+            // 处理零主元的情况（这里省略）  
+        }
+        for (int j = k; j < n; ++j) {
+            A[k][j] /= tmp;
+        }
+        A[k][k] = 1.0;
+
+        // 并行部分：使用行划分对其他行进行消元  
+#pragma omp parallel for num_threads(NUM_THREADS) private(tmp)  
+        for (int i = k + 1; i < n; ++i) {
+            tmp = A[i][k];
+            for (int j = k + 1; j < n; ++j) {
+               A[i][j] -= tmp * A[k][j];
+            }
+            A[i][k] = 0.0;
+        }
+
+        // 离开for循环时，各个线程默认同步，进入下一行的处理  
+    }
+}
+void omp_static_avx()
+{
+#pragma omp parallel num_threads(NUM_THREADS)
+    for (int k = 0; k < n; k++)
+    {
+        // 串行部分
+#pragma omp single
+        {
+            __m256d tmp = _mm256_set1_pd(A[k][k]);
+            for (int j = k + 1; j < n; j += 8)
+            {
+                __m256d aj = _mm256_loadu_pd(&A[k][j]);
+                aj = _mm256_div_pd(aj, tmp);
+                _mm256_storeu_pd(&A[k][j], aj);
+            }
+            A[k][k] = 1.0;
+        }
+
+        // 并行部分
+#pragma omp for schedule(static)
+        for (int i = k + 1; i < n; i++)
+        {
+            __m256d tmp = _mm256_set1_pd(A[i][k]);
+            for (int j = k + 1; j < n; j += 8)
+            {
+                __m256d akj = _mm256_loadu_pd(&A[k][j]);
+                __m256d aij = _mm256_loadu_pd(&A[i][j]);
+                __m256d tmp_mul = _mm256_mul_pd(tmp, akj);
+                __m256d new_aij = _mm256_sub_pd(aij, tmp_mul);
+                _mm256_storeu_pd(&A[i][j], new_aij);
+            }
+            A[i][k] = 0;
+        }
+    }
+}
+
+void omp_static_sse()
+{
+#pragma omp parallel num_threads(NUM_THREADS)
+    for (int k = 0; k < n; k++)
+    {
+        // 串行部分
+#pragma omp single
+        {
+            __m128d tmp = _mm_set1_pd(A[k][k]);
+            for (int j = k + 1; j < n; j += 8)
+            {
+                __m128d aj = _mm_loadu_pd(&A[k][j]);
+                aj = _mm_div_pd(aj, tmp);
+                _mm_storeu_pd(&A[k][j], aj);
+            }
+            A[k][k] = 1.0;
+        }
+
+        // 并行部分
+#pragma omp for schedule(static)
+        for (int i = k + 1; i < n; i++)
+        {
+            __m128d tmp = _mm_set1_pd(A[i][k]);
+            for (int j = k + 1; j < n; j += 8)
+            {
+                __m128d akj = _mm_loadu_pd(&A[k][j]);
+                __m128d aij = _mm_loadu_pd(&A[i][j]);
+                __m128d tmp_mul = _mm_mul_pd(tmp, akj);
+                __m128d new_aij = _mm_sub_pd(aij, tmp_mul);
+                _mm_storeu_pd(&A[i][j], new_aij);
+            }
+            A[i][k] = 0;
+        }
+    }
+}
+
+void omp_static()
+{
+#pragma omp parallel num_threads(NUM_THREADS)
+
+    for (int k = 0; k < n; k++)
+    {
+        //串行部分
+#pragma omp single
+        {
+            float tmp = A[k][k];
+            for (int j = k + 1; j < n; j++)
+            {
+                A[k][j] = A[k][j] / tmp;
+            }
+            A[k][k] = 1.0;
+        }
+
+        //并行部分
+#pragma omp for schedule(static)
+        for (int i = k + 1; i < n; i++)
+        {
+            float tmp = A[i][k];
+            for (int j = k + 1; j < n; j++)
+                A[i][j] = A[i][j] - tmp * A[k][j];
+            A[i][k] = 0;
+        }
+        // 离开for循环时，各个线程默认同步，进入下一行的处理
+    }
+}
+
+void omp_dynamic()
+{
+#pragma omp parallel num_threads(NUM_THREADS)
+
+    for (int k = 0; k < n; k++)
+    {
+        //串行部分
+#pragma omp single
+        {
+            float tmp = A[k][k];
+            for (int j = k + 1; j < n; j++)
+            {
+                A[k][j] = A[k][j] / tmp;
+            }
+            A[k][k] = 1.0;
+        }
+
+        //并行部分
+#pragma omp for schedule(dynamic, 80)
+        for (int i = k + 1; i < n; i++)
+        {
+            float tmp = A[i][k];
+            for (int j = k + 1; j < n; j++)
+                A[i][j] = A[i][j] - tmp * A[k][j];
+            A[i][k] = 0;
+        }
+        // 离开for循环时，各个线程默认同步，进入下一行的处理
+    }
+}
+
+int main() {
+    for (int y = 0; y < 3; y++)
+    {
+        srand(time(NULL));
+        init();
+        gettimeofday(&tstart, NULL);
+        open_ordi();
+        gettimeofday(&tend, NULL);
+        long timeUsed = (tend.tv_sec - tstart.tv_sec) * 1000000L + (tend.tv_usec - tstart.tv_usec);
+        std::cout << " Time=" << timeUsed / 1000.0 << " ms" << std::endl;
+    }
+}
